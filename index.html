@@ -121,7 +121,7 @@
       try {
         const { data, error } = await supabase
           .from('civil_status')
-          .select('number,status,notes')
+          .select('number,status,notes,transaction,created_at')
           .eq('number', num)
           .maybeSingle();
         if (error) throw error;
@@ -129,10 +129,23 @@
           result.textContent = "لم يتم العثور على الطلب. يرجى التأكد من صحة الرقم.";
           result.classList.add("error");
         } else {
+          // Format date (created_at)
+          let dateStr = "";
+          if (data.created_at) {
+            const d = new Date(data.created_at);
+            const y = d.getFullYear();
+            const m = String(d.getMonth()+1).padStart(2,'0');
+            const day = String(d.getDate()).padStart(2,'0');
+            dateStr = `${y}-${m}-${day}`;
+          }
           let out = `<b>رقم الطلب:</b> ${data.number}<br>`;
+          out += `<b>نوع المعاملة القنصلية:</b> ${data.transaction || 'غير محدد'}<br>`;
+          out += `<b>تاريخ تقديم الطلب:</b> ${dateStr || 'غير متوفر'}<br>`;
           out += `<b>الحالة الحالية:</b> ${data.status || 'غير محددة'}<br>`;
           if (data.notes && data.notes.trim()) {
-            out += `<b>ملاحظات:</b> <span style="white-space:pre-line">${data.notes}</span>`;
+            out += `<b>الملاحظات:</b> <span style="white-space:pre-line">${data.notes}</span>`;
+          } else {
+            out += `<b>الملاحظات:</b> لا توجد ملاحظات.`;
           }
           result.innerHTML = out;
           result.classList.add("success");
