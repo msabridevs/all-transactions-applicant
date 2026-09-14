@@ -357,7 +357,7 @@
 
         const { data, error } = await supabaseClient
           .from('civil_status')
-          .select('number,status,notes,transaction,created_at')
+          .select('number,status,notes,created_at')
           .eq('number', num)
           .maybeSingle();
 
@@ -376,11 +376,6 @@
         result.textContent = '';
 
         appendResultRow('رقم الطلب', data.number);
-
-        appendResultRow(
-          'نوع المعاملة القنصلية',
-          data.transaction || 'غير محدد'
-        );
 
         appendResultRow(
           'تاريخ تقديم الطلب',
