@@ -2,9 +2,11 @@
 <html lang="ar">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>الاستعلام عن طلب معاملة قنصلية</title>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -16,11 +18,11 @@
 
     .status-container {
       max-width: 600px;
-      margin: 40px auto 0 auto;
+      margin: 40px auto 0;
       background: white;
       border-radius: 8px;
       box-shadow: 0 2px 12px #0001;
-      padding: 30px 30px 22px 30px;
+      padding: 30px 30px 22px;
     }
 
     .header-title {
@@ -48,11 +50,31 @@
       box-sizing: border-box;
     }
 
+    label {
+      display: block;
+    }
+
     input {
       padding: 12px;
       border-radius: 5px;
       border: 1px solid #ccc;
-      margin-bottom: 20px;
+      margin-bottom: 8px;
+      direction: ltr;
+      text-align: left;
+    }
+
+    .input-hint {
+      margin: 0 0 20px;
+      color: #555;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .input-error {
+      margin: 0 0 15px;
+      color: #b71c1c;
+      font-size: 15px;
+      line-height: 1.6;
     }
 
     button {
@@ -76,10 +98,11 @@
       background: #f9f9f9;
       border-radius: 7px;
       border: 1px solid #e2e2e2;
-      padding: 16px 20px 12px 20px;
+      padding: 16px 20px 12px;
       font-size: 19px;
       min-height: 50px;
       color: #212121;
+      overflow-wrap: anywhere;
     }
 
     .error {
@@ -97,9 +120,7 @@
 </head>
 
 <body>
-
   <div class="status-container">
-
     <div class="header-title">
       الاستعلام عن طلب معاملة قنصلية
     </div>
@@ -114,18 +135,37 @@
       type="text"
       id="number"
       placeholder="مثال: 12345"
-      maxlength="10"
+      inputmode="numeric"
+      pattern="[0-9]{1,10}"
       autocomplete="off"
+      autocapitalize="off"
+      spellcheck="false"
+      dir="ltr"
+      aria-describedby="number-hint number-error"
     />
 
-    <button id="check-btn">استعلام</button>
+    <p id="number-hint" class="input-hint">
+      أرقام إنجليزية فقط (0–9)، بحد أقصى 10 أرقام، دون مسافات أو حروف أو رموز.
+    </p>
 
-    <div id="result" class="result"></div>
+    <p
+      id="number-error"
+      class="input-error"
+      role="alert"
+      hidden
+    ></p>
 
+    <button id="check-btn" type="button">استعلام</button>
+
+    <div
+      id="result"
+      class="result"
+      role="status"
+      aria-live="polite"
+    ></div>
   </div>
 
   <script>
-
     // ========== CONFIG ==========
 
     const SUPABASE_URL =
@@ -134,168 +174,253 @@
     const SUPABASE_ANON_KEY =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzYmdvenVpZ2pkYXZjeGlheG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQyMjU4NzUsImV4cCI6MjA1OTgwMTg3NX0.OiOH_0ZcTUPu6oMGILsq5oqm1FdCDBvzcHozs-4DNY0';
 
-    // مهم: لا نستخدم اسم supabase حتى لا يتعارض مع المكتبة
-    const supabaseClient =
-      window.supabase.createClient(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY
-      );
+    // ========== UI ELEMENTS ==========
 
-
-    // ========== UI LOGIC ==========
-
+    const numberInput = document.getElementById('number');
+    const numberError = document.getElementById('number-error');
     const btn = document.getElementById('check-btn');
     const result = document.getElementById('result');
 
+    const MAX_DIGITS = 10;
 
-    btn.onclick = async () => {
+    let lastValidNumber = '';
+    let supabaseClient = null;
 
-      const num =
-        document.getElementById('number').value.trim();
+    // يسمح بترك الحقل فارغًا أثناء التعديل.
+    function isValidEditingValue(value) {
+      return value.length <= MAX_DIGITS && !/[^0-9]/.test(value);
+    }
 
-      result.textContent = "";
-      result.className = "result";
+    function showNumberError(message) {
+      numberError.textContent =
+        message ||
+        'الإدخال مرفوض. استخدم الأرقام الإنجليزية من 0 إلى 9 فقط، بحد أقصى 10 أرقام، دون مسافات أو حروف أو رموز.';
 
+      numberError.hidden = false;
+    }
 
-      if (!num) {
+    function clearNumberError() {
+      numberError.textContent = '';
+      numberError.hidden = true;
+    }
 
-        result.textContent =
-          "يرجى إدخال رقم الطلب.";
+    function valueAfterInsertion(text) {
+      const start =
+        numberInput.selectionStart ?? numberInput.value.length;
 
-        result.classList.add("error");
+      const end =
+        numberInput.selectionEnd ?? start;
 
+      return (
+        numberInput.value.slice(0, start) +
+        text +
+        numberInput.value.slice(end)
+      );
+    }
+
+    // ========== INPUT VALIDATION ==========
+
+    // منع الإدخال غير المسموح قبل إضافته إلى الحقل.
+    numberInput.addEventListener('beforeinput', (event) => {
+      if (!event.inputType.startsWith('insert')) {
         return;
       }
 
+      // بعض طرق الإدخال لا توفر data؛ يعالجها حدث input.
+      if (event.data === null) {
+        return;
+      }
+
+      const nextValue = valueAfterInsertion(event.data);
+
+      if (!isValidEditingValue(nextValue)) {
+        event.preventDefault();
+        showNumberError();
+      }
+    });
+
+    // فحص النص الملصوق بالكامل، دون حذف أي جزء منه
+    // أو تحويل أرقامه أو اقتطاعه.
+    numberInput.addEventListener('paste', (event) => {
+      const pastedText = event.clipboardData?.getData('text');
+
+      if (
+        pastedText === undefined ||
+        !isValidEditingValue(pastedText) ||
+        !isValidEditingValue(valueAfterInsertion(pastedText))
+      ) {
+        event.preventDefault();
+        showNumberError();
+      }
+    });
+
+    // منع إسقاط نص داخل الحقل لتجنب إدخال رقم بالخطأ.
+    numberInput.addEventListener('drop', (event) => {
+      event.preventDefault();
+
+      showNumberError(
+        'السحب والإفلات غير مسموح. اكتب رقم الطلب أو الصقه باستخدام الأرقام الإنجليزية فقط.'
+      );
+    });
+
+    // تحقق إضافي لأي إدخال لم يمنعه المتصفح مسبقًا.
+    // نعيد آخر قيمة صحيحة بدل حذف المحارف وتغيير الرقم.
+    numberInput.addEventListener('input', () => {
+      if (isValidEditingValue(numberInput.value)) {
+        lastValidNumber = numberInput.value;
+        clearNumberError();
+      } else {
+        numberInput.value = lastValidNumber;
+        showNumberError();
+      }
+    });
+
+    // ========== RESULT DISPLAY ==========
+
+    // عرض بيانات الطلب كنص حتى لا تُفسر كأكواد HTML.
+    function appendResultRow(label, value, preserveLines = false) {
+      const row = document.createElement('div');
+      const title = document.createElement('b');
+      const content = document.createElement('span');
+
+      title.textContent = label + ': ';
+      content.textContent = String(value);
+
+      if (preserveLines) {
+        content.style.whiteSpace = 'pre-line';
+      }
+
+      row.append(title, content);
+      result.appendChild(row);
+    }
+
+    function formatDate(value) {
+      if (!value) {
+        return 'غير متوفر';
+      }
+
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        return 'غير متوفر';
+      }
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+
+      return `${year}-${month}-${day}`;
+    }
+
+    // ========== QUERY ==========
+
+    btn.onclick = async () => {
+      if (btn.disabled) {
+        return;
+      }
+
+      // لا نستخدم trim: أي مسافة تجعل القيمة غير مقبولة.
+      const num = numberInput.value;
+
+      result.textContent = '';
+      result.className = 'result';
+      clearNumberError();
+
+      if (!num) {
+        showNumberError('يرجى إدخال رقم الطلب.');
+        numberInput.focus();
+        return;
+      }
+
+      // تحقق نهائي قبل إرسال أي استعلام.
+      if (!isValidEditingValue(num)) {
+        showNumberError();
+        numberInput.focus();
+        return;
+      }
 
       btn.disabled = true;
-
-      result.textContent = "جاري البحث ...";
-
+      numberInput.disabled = true;
+      result.textContent = 'جاري البحث ...';
 
       try {
+        if (!supabaseClient) {
+          if (!window.supabase?.createClient) {
+            throw new Error('Supabase library is unavailable.');
+          }
 
-        const { data, error } =
-          await supabaseClient
-            .from('civil_status')
-            .select(
-              'number,status,notes,transaction,created_at'
-            )
-            .eq('number', num)
-            .maybeSingle();
+          supabaseClient = window.supabase.createClient(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY
+          );
+        }
 
+        const { data, error } = await supabaseClient
+          .from('civil_status')
+          .select('number,status,notes,transaction,created_at')
+          .eq('number', num)
+          .maybeSingle();
 
         if (error) {
           throw error;
         }
 
-
         if (!data) {
-
           result.textContent =
-            "لم يتم العثور على الطلب. يرجى التأكد من صحة الرقم.";
+            'لم يتم العثور على الطلب. يرجى التأكد من صحة الرقم.';
 
-          result.classList.add("error");
-
-        } else {
-
-          // Format date (created_at)
-
-          let dateStr = "";
-
-          if (data.created_at) {
-
-            const d =
-              new Date(data.created_at);
-
-            const y =
-              d.getFullYear();
-
-            const m =
-              String(d.getMonth() + 1)
-                .padStart(2, '0');
-
-            const day =
-              String(d.getDate())
-                .padStart(2, '0');
-
-            dateStr =
-              `${y}-${m}-${day}`;
-          }
-
-
-          let out =
-            `<b>رقم الطلب:</b> ${data.number}<br>`;
-
-          out +=
-            `<b>نوع المعاملة القنصلية:</b> ${data.transaction || 'غير محدد'}<br>`;
-
-          out +=
-            `<b>تاريخ تقديم الطلب:</b> ${dateStr || 'غير متوفر'}<br>`;
-
-          out +=
-            `<b>الحالة الحالية:</b> ${data.status || 'غير محددة'}<br>`;
-
-
-          if (
-            data.notes &&
-            data.notes.trim()
-          ) {
-
-            out +=
-              `<b>الملاحظات:</b> <span style="white-space:pre-line">${data.notes}</span>`;
-
-          } else {
-
-            out +=
-              `<b>الملاحظات:</b> لا توجد ملاحظات.`;
-
-          }
-
-
-          result.innerHTML = out;
-
-          result.classList.add("success");
+          result.classList.add('error');
+          return;
         }
 
+        result.textContent = '';
 
-      } catch (err) {
+        appendResultRow('رقم الطلب', data.number);
 
-        console.error(
-          'Supabase query error:',
-          err
+        appendResultRow(
+          'نوع المعاملة القنصلية',
+          data.transaction || 'غير محدد'
         );
 
+        appendResultRow(
+          'تاريخ تقديم الطلب',
+          formatDate(data.created_at)
+        );
+
+        appendResultRow(
+          'الحالة الحالية',
+          data.status || 'غير محددة'
+        );
+
+        const notes = String(data.notes ?? '');
+
+        appendResultRow(
+          'الملاحظات',
+          notes.trim() ? notes : 'لا توجد ملاحظات.',
+          true
+        );
+
+        result.classList.add('success');
+      } catch (err) {
+        console.error('Supabase query error:', err);
+
         result.textContent =
-          "حدث خطأ أثناء الاستعلام، يرجى المحاولة لاحقاً.";
+          'حدث خطأ أثناء الاستعلام، يرجى المحاولة لاحقاً.';
 
-        result.classList.add("error");
-
+        result.classList.add('error');
       } finally {
-
         btn.disabled = false;
-
+        numberInput.disabled = false;
       }
-
     };
 
-
-    // Enter key triggers search
-
-    document
-      .getElementById('number')
-      .addEventListener(
-        'keyup',
-        function(e) {
-
-          if (e.key === 'Enter') {
-            btn.click();
-          }
-
-        }
-      );
-
+    // الاستعلام عند الضغط على Enter.
+    numberInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        btn.click();
+      }
+    });
   </script>
-
 </body>
 </html>
